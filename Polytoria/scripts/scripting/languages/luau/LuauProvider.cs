@@ -170,6 +170,20 @@ public sealed partial class LuauProvider : IScriptLanguageProvider
 			async void run()
 			{
 				await ResumeThread(state, null, 0, isMainThread: true);
+
+				string updateKeyword = script.Compatibility ? "_update" : "_Update";
+				string fixedUpdateKeyword = script.Compatibility ? "_fixed_update" : "_FixedUpdate";
+
+				lock (state)
+				{
+					state.GetGlobal(updateKeyword);
+					script.HasUpdate = state.IsFunction(-1);
+					state.Pop(1);
+
+					state.GetGlobal(fixedUpdateKeyword);
+					script.HasFixedUpdate = state.IsFunction(-1);
+					state.Pop(1);
+				}
 			}
 
 			run();

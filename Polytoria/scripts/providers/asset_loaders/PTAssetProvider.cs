@@ -28,13 +28,39 @@ public class PTAssetProvider : IAssetProvider
 		_client.DefaultRequestHeaders["Authorization"] = PolyCreatorAPI.Token;
 #endif
 
-		string url = GetAssetServeURL(item.ID, item.Type);
+		byte[] buffer;
+		string cacheDir = ProjectSettings.GlobalizePath("user://cache/assets");
+		string itemCacheDir = System.IO.Path.Combine(cacheDir, item.Type.ToString());
+		string cachePath = System.IO.Path.Combine(itemCacheDir, item.ID.ToString());
 
-		ServeResponse response = await _client.GetFromJsonAsync(url, ServeResponseGenerationContext.Default.ServeResponse);
-		byte[] buffer = await _client.GetByteArrayAsync(response.Url);
+		if (System.IO.File.Exists(cachePath))
+		{
+			buffer = await System.IO.File.ReadAllBytesAsync(cachePath);
+			item.DirectURL = "file://" + cachePath;
+		}
+		else
+		{
+			string url = GetAssetServeURL(item.ID, item.Type);
+			ServeResponse response = await _client.GetFromJsonAsync(url, ServeResponseGenerationContext.Default.ServeResponse);
+			buffer = await _client.GetByteArrayAsync(response.Url);
+
+			try
+			{
+				if (!System.IO.Directory.Exists(itemCacheDir))
+				{
+					System.IO.Directory.CreateDirectory(itemCacheDir);
+				}
+				await System.IO.File.WriteAllBytesAsync(cachePath, buffer);
+			}
+			catch (Exception ex)
+			{
+				GD.PushWarning($"Failed to write asset disk cache: {ex.Message}");
+			}
+
+			item.DirectURL = response.Url;
+		}
+
 		item.SizeBytes = buffer.LongLength;
-
-		item.DirectURL = response.Url;
 
 		switch (item.Type)
 		{
@@ -86,8 +112,16 @@ public class PTAssetProvider : IAssetProvider
 				{
 					Image image = new();
 					image.LoadPngFromBuffer(buffer);
-					image.GenerateMipmaps();
-					image.FixAlphaEdges();
+
+					// Only generate mipmaps and fix alpha edges for full-size
+					// asset textures; thumbnails and decals are typically small
+					// and displayed at fixed sizes where mipmaps waste memory.
+					bool needsFullProcessing = item.Type is ResourceType.Asset or ResourceType.Decal;
+					if (needsFullProcessing)
+					{
+						image.GenerateMipmaps();
+						image.FixAlphaEdges();
+					}
 
 					if (item.Resize != null)
 					{

@@ -210,6 +210,7 @@ public class NetworkInstance
 			{
 				GD.PushError(ex);
 			}
+			System.Threading.Thread.Sleep(1);
 		}
 	}
 

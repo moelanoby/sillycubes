@@ -16,6 +16,8 @@ namespace Polytoria.Datamodel;
 public partial class Script : Instance
 {
 	public bool Ran = false;
+	internal bool HasUpdate = false;
+	internal bool HasFixedUpdate = false;
 
 	internal Scripting.Luau.LuaState? LuauState;
 	internal Scripting.Luau.LuaState? LuauMainThread;
@@ -162,6 +164,7 @@ public partial class Script : Instance
 	{
 		base.Process(delta);
 		if (!ShouldContinue) return;
+		if (!HasUpdate) return;
 		if (LanguageProvider == null) return;
 
 		LanguageProvider.CallUpdate(this, delta);
@@ -171,6 +174,7 @@ public partial class Script : Instance
 	{
 		base.PhysicsProcess(delta);
 		if (!ShouldContinue) return;
+		if (!HasFixedUpdate) return;
 		if (LanguageProvider == null) return;
 
 		LanguageProvider.CallFixedUpdate(this, delta);

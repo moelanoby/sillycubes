@@ -135,8 +135,13 @@ public sealed partial class NetworkReplicateSync : Instance
 					value.Add(data);
 				}
 			}
-			// hope and prayers
-			await Globals.Singleton.WaitFrame();
+
+			// On local test servers, skip per-chunk frame yielding to avoid
+			// adding unnecessary latency during fast localhost replication.
+			if (!Root.IsLocalTest)
+			{
+				await Globals.Singleton.WaitFrame();
+			}
 		}
 	}
 

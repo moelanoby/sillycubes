@@ -565,10 +565,19 @@ public static class XmlFormat
 		instance.LegacyName = item.Name;
 		instance.Root = root;
 
-		// Force Compatibility on old scripts
+		// Force Compatibility on old scripts unless marked with ---@DISABLE_COMPATIBILITY
 		if (instance is Datamodel.Script script)
 		{
-			script.Compatibility = true;
+			bool disableCompat = false;
+			foreach (var prop in item.Properties)
+			{
+				if (prop.Property.Name == "Source" && prop.Value is string sourceVal && sourceVal.Contains("---@DISABLE_COMPATIBILITY"))
+				{
+					disableCompat = true;
+					break;
+				}
+			}
+			script.Compatibility = !disableCompat;
 		}
 
 		// Apply properties

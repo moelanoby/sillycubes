@@ -831,37 +831,51 @@ public sealed partial class World : Instance
 			socialService,
 		];
 
-		var targetPositions = orderedChildren
-			.Select((child, index) => (child, index))
-			.ToDictionary(x => x.child, x => x.index);
-		Instance[] childrenToMove = [.. Children.Where(targetPositions.ContainsKey)];
-		Instance[] childrenToKeep = [.. Children.Where(c => !targetPositions.ContainsKey(c))];
-		Instance[] sortedMovedChildren = [.. childrenToMove.OrderBy(c => targetPositions[c])];
+		// Build O(1) lookup for target positions
+		var targetPositions = new Dictionary<Instance, int>(orderedChildren.Count);
+		for (int i = 0; i < orderedChildren.Count; i++)
+		{
+			targetPositions[orderedChildren[i]] = i;
+		}
 
-		// Rebuild the Children list
+		// Separate children into moved (standard services) and kept (others)
+		var movedChildren = new List<Instance>(orderedChildren.Count);
+		var keptChildren = new List<Instance>(Children.Count - orderedChildren.Count);
+
+		foreach (Instance child in Children)
+		{
+			if (targetPositions.ContainsKey(child))
+				movedChildren.Add(child);
+			else
+				keptChildren.Add(child);
+		}
+
+		// Sort moved children by their target position
+		movedChildren.Sort((a, b) => targetPositions[a].CompareTo(targetPositions[b]));
+
+		// Rebuild the Children list by merging moved children at their
+		// target positions with kept children filling the gaps.
 		Children.Clear();
 
+		int movedIndex = 0;
 		int keptIndex = 0;
-		for (int i = 0; i < sortedMovedChildren.Length + childrenToKeep.Length; i++)
-		{
-			Instance? movedChild = sortedMovedChildren.FirstOrDefault(c => targetPositions[c] == i);
+		int totalCount = movedChildren.Count + keptChildren.Count;
 
-			if (movedChild != null)
+		for (int i = 0; i < totalCount; i++)
+		{
+			if (movedIndex < movedChildren.Count && targetPositions[movedChildren[movedIndex]] == i)
 			{
-				Children.Add(movedChild);
+				Children.Add(movedChildren[movedIndex++]);
 			}
-			else if (keptIndex < childrenToKeep.Length)
+			else if (keptIndex < keptChildren.Count)
 			{
-				Children.Add(childrenToKeep[keptIndex]);
-				keptIndex++;
+				Children.Add(keptChildren[keptIndex++]);
 			}
 		}
 
-		// Add any remaining children at the end
-		while (keptIndex < childrenToKeep.Length)
+		while (keptIndex < keptChildren.Count)
 		{
-			Children.Add(childrenToKeep[keptIndex]);
-			keptIndex++;
+			Children.Add(keptChildren[keptIndex++]);
 		}
 
 		// Update all indices

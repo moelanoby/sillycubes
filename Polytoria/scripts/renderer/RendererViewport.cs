@@ -7,6 +7,7 @@ using Polytoria.Client;
 using Polytoria.Datamodel;
 using Polytoria.Datamodel.Services;
 using Polytoria.Shared;
+using Polytoria.Renderer.Optimization;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;

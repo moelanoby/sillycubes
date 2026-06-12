@@ -33,7 +33,9 @@ public partial class AssetLoader : Node
 
 	private readonly ConcurrentDictionary<AssetCacheKey, CacheItem> _cache = [];
 	private readonly ConcurrentDictionary<AssetCacheKey, Lazy<Task<CacheItem>>> _pendingRequests = [];
+	private readonly ConcurrentQueue<AssetCacheKey> _cacheOrder = [];
 	public int MaxConcurrentRequests { get; set; } = DefaultMaxConcurrentRequests;
+	public int MaxCacheSize { get; set; } = 512;
 
 	private SemaphoreSlim _loadSlots = null!;
 
@@ -42,6 +44,17 @@ public partial class AssetLoader : Node
 	private static AssetCacheKey KeyFor(CacheItem item)
 	{
 		return new AssetCacheKey(item.Type, item.ID, item.Resize);
+	}
+
+	private void EvictCacheIfNeeded()
+	{
+		while (_cache.Count > MaxCacheSize && _cacheOrder.TryDequeue(out AssetCacheKey oldestKey))
+		{
+			if (_cache.TryRemove(oldestKey, out CacheItem removedItem))
+			{
+				Interlocked.Add(ref _assetSizeBytes, -removedItem.SizeBytes);
+			}
+		}
 	}
 
 	private async Task<CacheItem> LoadResource(CacheItem item)
@@ -77,10 +90,12 @@ public partial class AssetLoader : Node
 		await _loadSlots.WaitAsync();
 		try
 		{
-			CacheItem result = await LoadResource(item);
-			_cache[key] = result;
-			Interlocked.Add(ref _assetSizeBytes, result.SizeBytes);
-			return result;
+		CacheItem result = await LoadResource(item);
+		_cache[key] = result;
+		Interlocked.Add(ref _assetSizeBytes, result.SizeBytes);
+		_cacheOrder.Enqueue(key);
+		EvictCacheIfNeeded();
+		return result;
 		}
 		finally
 		{
