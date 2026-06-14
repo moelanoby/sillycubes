@@ -64,6 +64,8 @@ public sealed partial class World : Instance
 	[ScriptProperty]
 	public bool IsLocalTest => _worldID == 0;
 
+	public bool IsLocalServer { get; set; } = false;
+
 	public SessionTypeEnum SessionType { get; set; } = SessionTypeEnum.Client;
 
 	// TODO: Server Vitals/world properties doesn't work yet, make it work

@@ -412,7 +412,7 @@ public sealed partial class InputService : Instance
 		if (Root.CoreUI != null && Root.CoreUI.CoreUI != null && Root.CoreUI.CoreUI.CoreUIActive) return false;
 		if (Root.Entry != null && !Root.Entry.IsFocused) return false;
 		if (Root.SessionType == World.SessionTypeEnum.Creator) return false;
-		if (Root.Network.IsServer) return false;
+		if (Root.Network.IsServer && !Root.IsLocalServer) return false;
 		Control? focusOwner = GDNode.GetViewport().GuiGetFocusOwner();
 		if (focusOwner != null)
 		{
@@ -684,7 +684,7 @@ public sealed partial class InputService : Instance
 
 	private void ProcessInputs()
 	{
-		if (Root != null && Root.Network.IsServer) return;
+		if (Root != null && Root.Network.IsServer && !Root.IsLocalServer) return;
 		if (!IsGameFocused) return;
 		foreach (InputAction a in MapData.Actions)
 		{

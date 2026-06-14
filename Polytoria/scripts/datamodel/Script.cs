@@ -121,7 +121,7 @@ public partial class Script : Instance
 		if (!IsEnabled) return;
 		if (Source == "" && Bytecode == null) return;
 		if ((this is ServerScript && !Root.IsLoaded) || !IsNetworkReady) return;
-		if (this is ClientScript && Root.Network.IsServer) return;
+		if (this is ClientScript && Root.Network.IsServer && !Root.IsLocalServer) return;
 		if (this is ServerScript && !Root.Network.IsServer) return;
 		Run();
 	}

@@ -544,13 +544,13 @@ public sealed partial class Globals : Node
 	}
 
 	public enum AppEntryEnum
-	{
-		Client,
-		Creator,
-		MobileUI,
-		Renderer
-	}
-
+{
+	Client,
+	Creator,
+	MobileUI,
+	Renderer,
+	Website
+}
 	public Node SwitchEntry(AppEntryEnum appEntry)
 	{
 		PT.Print("Switching entry to: ", appEntry);
@@ -570,12 +570,14 @@ public sealed partial class Globals : Node
 			AppEntryEnum.Creator => "res://scenes/creator/creator.tscn",
 			AppEntryEnum.MobileUI => "res://scenes/mobile/mobile.tscn",
 			AppEntryEnum.Renderer => "res://scenes/renderer/renderer.tscn",
+			AppEntryEnum.Website => "res://scenes/client/client.tscn",
 			_ => "res://scenes/client/client.tscn",
 		};
 		string? iconToLoad = appEntry switch
 		{
 			AppEntryEnum.Client => "client",
 			AppEntryEnum.Creator => "creator",
+			AppEntryEnum.Website => "client",
 			_ => null
 		};
 

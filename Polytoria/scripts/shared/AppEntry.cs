@@ -58,7 +58,7 @@ public partial class AppEntry : Node
 		}
 #endif
 
-		AppEntryEnum entry = AppEntryEnum.Client;
+		AppEntryEnum entry = AppEntryEnum.Website;
 		if (OS.HasFeature("client"))
 		{
 			entry = AppEntryEnum.Client;

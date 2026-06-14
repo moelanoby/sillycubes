@@ -1,5 +1,5 @@
 <Project Sdk="Godot.NET.Sdk/4.6.2">
-	<PropertyGroup>
+  <PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
 		<Nullable>enable</Nullable>
 		<PublishAot>true</PublishAot>
@@ -48,6 +48,16 @@
 		<PackageReference Include="ZstdSharp.Port" Version="0.8.7" />
 		<PackageReference Include="Humanizer.Core" Version="3.0.10" />
 	</ItemGroup>
+
+	<!-- P2P Web UI - copy dist files to output -->
+	<Target Name="CopyWebUI" AfterTargets="Build">
+		<ItemGroup>
+			<WebUIFiles Include="scripts/network/p2p/webui/dist/**/*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(WebUIFiles)" 
+			  DestinationFiles="@(WebUIFiles->'$(OutputPath)/webui/%(RecursiveDir)%(Filename)%(Extension)')" 
+			  SkipUnchangedFiles="true" />
+	</Target>
 
 	<ItemGroup>
 		<ProjectReference Include="..\Polytoria.SourceGen\Polytoria.SourceGen.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />

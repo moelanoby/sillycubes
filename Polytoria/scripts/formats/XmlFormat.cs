@@ -551,7 +551,13 @@ public static class XmlFormat
 				return null;
 			}
 
-			instance.Name = item.Name;
+			// Static types (like Inventory) already have their name set via NameOverride in LoadNetworkedObject.
+			// Trying to set Name via the property setter would throw because [Static] prevents renaming.
+			if (!instance.GetType().IsDefined(typeof(StaticAttribute), false))
+			{
+				instance.Name = item.Name;
+			}
+
 			instance.AutoInvokeReady = false;
 			instance.CallInitOverrides = false;
 			instance.SetNetworkParent(parent, force: true);

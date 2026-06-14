@@ -11,6 +11,7 @@ using Polytoria.Client.Debugger;
 using Polytoria.Client.Settings;
 using Polytoria.Client.Settings.Appliers;
 using Polytoria.Client.WebAPI;
+using Polytoria.Client.WebAPI.Interfaces;
 using Polytoria.Shared.Settings;
 #if CREATOR
 using Polytoria.Creator.Utils;
@@ -19,6 +20,7 @@ using Polytoria.Datamodel;
 using Polytoria.Datamodel.Services;
 using Polytoria.Schemas.API;
 using Polytoria.Shared;
+using Polytoria.Networking.P2P;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -33,13 +35,24 @@ public sealed partial class ClientEntry : Node3D
 	public event Action? NetworkEssentialsReady;
 	public event Action? LeaveGameRequested;
 	public event Action? TargetServerReady;
-	public NetworkService NetworkService { get; private set; } = null!;
-	public DatamodelBridge DatamodelBridge { get; private set; } = null!;
+	public NetworkService NetworkService { get; internal set; } = null!;
+	public DatamodelBridge DatamodelBridge { get; internal set; } = null!;
 
 	public World Root = null!;
 	public bool IsFocused = false;
 	public bool IsContained = false;
 	public bool IsNetEssentialsReady { get; private set; } = false;
+
+	/// <summary>
+	/// Called by WebUIEntry after a local world is loaded to fire events
+	/// that the loading screen and other components are waiting on.
+	/// </summary>
+	internal void SignalNetworkEssentialsReady()
+	{
+		IsNetEssentialsReady = true;
+		NetworkEssentialsReady?.Invoke();
+	}
+
 	private readonly List<int> _clientProcesses = [];
 	public bool IsSoloTest = false;
 
@@ -109,6 +122,9 @@ public sealed partial class ClientEntry : Node3D
 #endif
 		networkMode ??= "client";
 
+		cmdargs.TryGetValue("webui", out string? webuiMode);
+		bool isWebUIMode = networkMode == "p2p" || (webuiMode != "false" && webuiMode != "0");
+
 		if (networkMode == "server")
 		{
 			isServer = true;
@@ -136,6 +152,14 @@ public sealed partial class ClientEntry : Node3D
 			if (data.Value.Token != null)
 			{
 				token = data.Value.Token;
+			}
+			
+			// Handle local world data from WebUI
+			if (isWebUIMode && data.Value.LocalWorldData != null)
+			{
+				PT.Print("[P2P] Local world data provided, will load after initialization...");
+				isServer = true;
+				isClient = false;
 			}
 		}
 
@@ -189,7 +213,7 @@ public sealed partial class ClientEntry : Node3D
 			DisplayServer.WindowSetMode(DisplayServer.WindowMode.Fullscreen);
 		}
 
-		// Setup essentials 
+		// Setup essentials (ALWAYS - needed for WebUI mode too)
 		ClientSettingsService settings = new()
 		{
 			Name = "ClientSettings",
@@ -219,6 +243,10 @@ public sealed partial class ClientEntry : Node3D
 		};
 		NetworkService = networkService;
 
+		PolyAuthAPI.ClientConnector = new PolyClientConnector();
+		PolyAuthAPI.ServerListener = new PolyServerListener();
+		PolyServerAPI.ServerInterface = new PolyServerInterface();
+
 		networkService.Attach(Root);
 		networkService.IsServer = isServer;
 		networkService.NetworkParent = Root;
@@ -228,6 +256,64 @@ public sealed partial class ClientEntry : Node3D
 		Root.Entry = this;
 		Root.World3D = GetWorld3D();
 		Root.InitEntry();
+
+		// Now handle WebUI mode AFTER initialization
+		if (isWebUIMode)
+		{
+			PT.Print("[P2P] Starting in WebUI mode (services initialized)...");
+			WebUIEntry.Start(this, cmdargs);
+			
+			// If we have local world data, load it now
+			if (data.HasValue && data.Value.LocalWorldData != null)
+			{
+				PT.Print("[P2P] Loading local world data...");
+
+				// Must set up services, bridge, and current before loading world
+				DatamodelBridge.Attach(Root);
+				World.Current = Root;
+				Root.Setup();
+
+				try
+				{
+					await DatamodelLoader.LoadWorldBytes(Root, data.Value.LocalWorldData, "main.poly");
+					PT.Print("[P2P] Local world loaded!");
+				}
+				catch (Exception ex)
+				{
+					PT.PrintErr(ex);
+					OS.Alert("Local world load failed");
+					Globals.Singleton.Quit();
+					return;
+				}
+
+				Root.IsLocalServer = true;
+				IsNetEssentialsReady = true;
+				NetworkEssentialsReady?.Invoke();
+
+				// Start local P2P server
+				int localPort = 24221;
+				networkService.CreateP2P(localPort);
+
+				// Create local player
+				if (Root.Players != null && Root.Players.AbsolutePlayersCount == 0)
+				{
+				Player localPlayer = Globals.LoadInstance<Player>(Root)!;
+				localPlayer.PeerID = networkService.LocalPeerID;
+				localPlayer.UserID = TestUserID;
+				localPlayer.Name = "Player";
+				localPlayer.Parent = Root.Players;
+				localPlayer.OnNetReady();
+				localPlayer.IsReady = true;
+					localPlayer.Anchored = false;
+					localPlayer.Respawn();
+					Root.Players.InvokePlayerAdded(localPlayer);
+				}
+
+				Root.DispatchClientScriptRun();
+			}
+			
+			return; // WebUI handles the rest
+		}
 
 		DatamodelBridge.Attach(Root);
 		World.Current = Root;
@@ -281,6 +367,22 @@ public sealed partial class ClientEntry : Node3D
 					return;
 				}
 				PT.Print("World Loaded!");
+			}
+			else if (data.HasValue && data.Value.LocalWorldData != null)
+			{
+				PT.Print("Loading local world from WebUI...");
+				try
+				{
+					await DatamodelLoader.LoadWorldBytes(Root, data.Value.LocalWorldData, "main.poly");
+				}
+				catch (Exception ex)
+				{
+					PT.PrintErr(ex);
+					OS.Alert("Local world load failed");
+					Globals.Singleton.Quit();
+					return;
+				}
+				PT.Print("Local World Loaded!");
 			}
 			Root.Environment.CameraOverride = freeLook;
 
@@ -570,5 +672,6 @@ public sealed partial class ClientEntry : Node3D
 		public bool? TestIsServer;
 		public string? TestWorldPath;
 		public string? TestDebugID;
+		public byte[]? LocalWorldData;
 	}
 }

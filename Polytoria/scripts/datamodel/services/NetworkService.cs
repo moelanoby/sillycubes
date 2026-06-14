@@ -12,6 +12,7 @@ using Polytoria.Client.WebAPI.Interfaces;
 using Polytoria.Datamodel.Data;
 using Polytoria.Networking;
 using Polytoria.Networking.Interfaces;
+using Polytoria.Networking.P2P;
 using Polytoria.Networking.RateLimiters;
 using Polytoria.Networking.Synchronizers;
 using Polytoria.Schemas.API;
@@ -96,6 +97,13 @@ public sealed partial class NetworkService : Instance
 	// Is production
 	public bool IsProd = false;
 	public NetworkModeEnum NetworkMode { get; set; } = NetworkModeEnum.Client;
+
+	// P2P components
+	public bool IsP2PMode = false;
+	public Polytoria.Networking.P2P.P2PNetworkInstance? P2PInstance = null;
+	public Polytoria.Networking.P2P.PeerClusterManager? P2PClusterManager = null;
+	public Polytoria.Networking.P2P.SwarmDHT? P2PDHT = null;
+	public Polytoria.Networking.P2P.HybridAuthorityManager? P2PAuthorityManager = null;
 
 	private ulong placeReplicationStartTime = 0;
 	private readonly Dictionary<string, List<NetReplicateData>> _pendingReplications = [];
@@ -413,6 +421,115 @@ public sealed partial class NetworkService : Instance
 		OnSessionStarted();
 	}
 
+	/// <summary>
+	/// Create a P2P mesh network instance.
+	/// </summary>
+	public void CreateP2P(int port = 24221, bool useNatTraversal = false, string? stunServer = null)
+	{
+		SetupNetwork();
+		InitNodes();
+		Root.ListenToNetworkService();
+
+		IsP2PMode = true;
+		IsServer = true;
+
+		// Initialize P2P components
+		P2PInstance = new Polytoria.Networking.P2P.P2PNetworkInstance("*", port);
+		P2PClusterManager = new Polytoria.Networking.P2P.PeerClusterManager(P2PInstance);
+		P2PDHT = new Polytoria.Networking.P2P.SwarmDHT(P2PInstance, P2PClusterManager);
+		P2PAuthorityManager = new Polytoria.Networking.P2P.HybridAuthorityManager(P2PInstance, P2PClusterManager, P2PDHT);
+
+		// Wire up events
+		P2PInstance.PeerConnected += OnP2PPeerConnected;
+		P2PInstance.PeerDisconnected += OnP2PPeerDisconnected;
+		P2PInstance.MessageReceived += OnP2PMessageReceived;
+
+		// Initialize cluster manager
+		P2PClusterManager.Initialize();
+		P2PDHT.Start();
+
+		// Start listening
+		if (useNatTraversal && stunServer != null)
+		{
+			_ = P2PInstance.ConnectWithNatTraversal(stunServer);
+		}
+		else
+		{
+			P2PInstance.StartListening(port);
+		}
+
+		LocalPeerID = P2PInstance.LocalPeerId;
+		ActivePeerIDs.Add(LocalPeerID);
+
+		Root.Players.PlayerAdded.Connect(OnPlayerAdded);
+		Root.Players.PlayerRemoved.Connect(OnPlayerRemoved);
+
+		PT.Print($"[P2P] Server started on port {port}");
+		OnServerStarted();
+		OnSessionStarted();
+	}
+
+	/// <summary>
+	/// Connect to a P2P peer.
+	/// </summary>
+	public void JoinP2P(string address, int port)
+	{
+		if (P2PInstance == null)
+		{
+			PT.PrintErr("[P2P] Not initialized. Call CreateP2P first.");
+			return;
+		}
+
+		P2PInstance.ConnectToPeer(address, port);
+		PT.Print($"[P2P] Connecting to {address}:{port}");
+	}
+
+	private void OnP2PPeerConnected(int peerId)
+	{
+		PT.Print($"[P2P] Peer {peerId} connected");
+		ActivePeerIDs.Add(peerId);
+
+		// Create player for this peer
+		Player plr = Globals.LoadInstance<Player>(Root)!;
+		plr.PeerID = peerId;
+		plr.UserID = peerId;
+		plr.Name = $"Peer_{peerId}";
+		plr.Parent = Root.Players;
+
+		// Store peer info in DHT
+		PeerInfo? peerInfo = P2PClusterManager?.AllPeers.FirstOrDefault(p => p.PeerId == peerId);
+		if (peerInfo != null)
+		{
+			P2PDHT?.StorePeerInfo(peerInfo);
+		}
+
+		// Replicate world to new peer
+		ReplicateSync.SyncPlaceToPlayer(plr);
+	}
+
+	private void OnP2PPeerDisconnected(int peerId)
+	{
+		PT.Print($"[P2P] Peer {peerId} disconnected");
+		ActivePeerIDs.Remove(peerId);
+
+		Player? plr = Root.Players.GetPlayerFromPeerID(peerId);
+		if (plr != null)
+		{
+			Root.Players.PeerIDToPlayer.Remove(peerId);
+			Root.Players.InvokePlayerRemoved(plr);
+			plr.ForceDelete();
+		}
+
+		// Rebalance authority
+		P2PAuthorityManager?.RebalanceAuthority();
+	}
+
+	private void OnP2PMessageReceived(int peerId, byte[] data, TransferMode transferMode)
+	{
+		// Route through existing message handling
+		OnMessageRecv(peerId, data, transferMode);
+	}
+
 	private async void ServerSendHeartbeat()
 	{
 		_heartbeatCount++;
@@ -606,9 +723,9 @@ public sealed partial class NetworkService : Instance
 		try
 		{
 			validateRes = new() { CanChat = true, UserID = testUserID, IsCreator = false, IsAgeRestricted = false };
-			if (OS.HasFeature("offline") || (Root.Entry != null && Root.Entry.IsSoloTest))
+			if (OS.HasFeature("offline") || (Root.Entry != null && Root.Entry.IsSoloTest) || string.IsNullOrEmpty(userToken))
 			{
-				// Offline data
+				// Offline data (also used for local servers without auth tokens)
 				validateRes.IsCreator = true;
 				userData = new() { Username = "Player" + testUserID.ToString(), Id = testUserID, IsStaff = false };
 			}
