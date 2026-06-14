@@ -10,6 +10,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 
 namespace Polytoria.Networking.P2P;
@@ -65,7 +66,7 @@ public class SignalClient : IDisposable
         {
             if (!_useDhtDirect)
             {
-                string json = JsonSerializer.Serialize(new { username });
+                string json = new JsonObject { ["username"] = username }.ToJsonString();
                 System.Net.Http.StringContent content = new(json, System.Text.Encoding.UTF8, "application/json");
 
                 System.Net.Http.HttpResponseMessage response = await _http!.PostAsync($"{_baseUrl}/api/servers", content);
@@ -160,7 +161,7 @@ public class SignalClient : IDisposable
 
         try
         {
-            string json = JsonSerializer.Serialize(new { ip, port, playerCount });
+            string json = new JsonObject { ["ip"] = ip, ["port"] = port, ["playerCount"] = playerCount }.ToJsonString();
             System.Net.Http.StringContent content = new(json, System.Text.Encoding.UTF8, "application/json");
 
             await _http.PutAsync($"{_baseUrl}/api/servers/{_serverCode}/heartbeat", content);

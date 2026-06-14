@@ -12,6 +12,7 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -51,7 +52,11 @@ public class WebServer : IDisposable
         set
         {
             _localUsername = value;
-            BroadcastWsMessage(new { type = "username", username = value });
+            BroadcastWsMessage(new JsonObject
+            {
+                ["type"] = "username",
+                ["username"] = value
+            });
         }
     }
 
@@ -103,9 +108,9 @@ public class WebServer : IDisposable
     /// <summary>
     /// Broadcast a message to all connected WebSocket clients.
     /// </summary>
-    public void BroadcastWsMessage(object message)
+    public void BroadcastWsMessage(JsonNode message)
     {
-        string json = JsonSerializer.Serialize(message, new JsonSerializerOptions
+        string json = message.ToJsonString(new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
@@ -125,10 +130,13 @@ public class WebServer : IDisposable
     /// </summary>
     public void BroadcastServerList(List<ServerInfo> servers)
     {
-        BroadcastWsMessage(new
+        var arr = new JsonArray();
+        foreach (var s in servers)
+            arr.Add(JsonSerializer.SerializeToNode(s, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        BroadcastWsMessage(new JsonObject
         {
-            type = "server_list",
-            servers
+            ["type"] = "server_list",
+            ["servers"] = arr
         });
     }
 
@@ -137,11 +145,11 @@ public class WebServer : IDisposable
     /// </summary>
     public void NotifyPeerConnected(string username, int peerId)
     {
-        BroadcastWsMessage(new
+        BroadcastWsMessage(new JsonObject
         {
-            type = "peer_connected",
-            username,
-            peerId
+            ["type"] = "peer_connected",
+            ["username"] = username,
+            ["peerId"] = peerId
         });
         PeerConnectedToGame?.Invoke(peerId, username);
     }
@@ -151,11 +159,11 @@ public class WebServer : IDisposable
     /// </summary>
     public void NotifyPeerDisconnected(string username, int peerId)
     {
-        BroadcastWsMessage(new
+        BroadcastWsMessage(new JsonObject
         {
-            type = "peer_disconnected",
-            username,
-            peerId
+            ["type"] = "peer_disconnected",
+            ["username"] = username,
+            ["peerId"] = peerId
         });
     }
 
@@ -265,7 +273,7 @@ public class WebServer : IDisposable
         catch (Exception ex)
         {
             GD.PushError($"[WebUI] Request error: {ex.Message}");
-            SendJson(response, HttpStatusCode.InternalServerError, new { error = ex.Message });
+            SendJson(response, HttpStatusCode.InternalServerError, new JsonObject { ["error"] = ex.Message });
         }
         finally
         {
@@ -279,7 +287,7 @@ public class WebServer : IDisposable
     {
         // Query DHT for servers
         List<ServerInfo> servers = await DiscoverServers();
-        SendJson(response, HttpStatusCode.OK, new { servers });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["servers"] = JsonSerializer.SerializeToNode(servers, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) });
     }
 
     private async Task HandleCreateServer(HttpListenerRequest request, HttpListenerResponse response)
@@ -301,7 +309,7 @@ public class WebServer : IDisposable
         ServerCreated?.Invoke(code, _port);
         PT.Print($"[WebUI] Server created: {code}");
 
-        SendJson(response, HttpStatusCode.OK, new { code, server });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["code"] = code, ["server"] = JsonSerializer.SerializeToNode(server, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) });
     }
 
     private async Task HandleJoinServer(string code, HttpListenerRequest request, HttpListenerResponse response)
@@ -310,21 +318,21 @@ public class WebServer : IDisposable
 
         if (json == null)
         {
-            SendJson(response, HttpStatusCode.NotFound, new { error = "Server not found" });
+            SendJson(response, HttpStatusCode.NotFound, new JsonObject { ["error"] = "Server not found" });
             return;
         }
 
         ServerInfo? server = JsonSerializer.Deserialize<ServerInfo>(json);
         if (server == null)
         {
-            SendJson(response, HttpStatusCode.NotFound, new { error = "Invalid server data" });
+            SendJson(response, HttpStatusCode.NotFound, new JsonObject { ["error"] = "Invalid server data" });
             return;
         }
 
         ServerJoinRequested?.Invoke(code);
         PT.Print($"[WebUI] Joining server: {code}");
 
-        SendJson(response, HttpStatusCode.OK, new { server });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["server"] = JsonSerializer.SerializeToNode(server, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }) });
     }
 
     private async Task HandleHeartbeat(string code, HttpListenerRequest request, HttpListenerResponse response)
@@ -332,14 +340,14 @@ public class WebServer : IDisposable
         string? body = await ReadBodyString(request);
         if (body == null)
         {
-            SendJson(response, HttpStatusCode.BadRequest, new { error = "No body" });
+            SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "No body" });
             return;
         }
 
         HeartbeatData? data = JsonSerializer.Deserialize<HeartbeatData>(body);
         if (data == null)
         {
-            SendJson(response, HttpStatusCode.BadRequest, new { error = "Invalid data" });
+            SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "Invalid data" });
             return;
         }
 
@@ -357,14 +365,14 @@ public class WebServer : IDisposable
             await _dht.Store($"server:{code}", JsonSerializer.Serialize(server), TimeSpan.FromMinutes(30));
         }
 
-        SendJson(response, HttpStatusCode.OK, new { ok = true });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["ok"] = true });
     }
 
     private async Task HandleDeleteServer(string code, HttpListenerResponse response)
     {
         _dht.Remove($"server:{code}");
         PT.Print($"[WebUI] Server deleted: {code}");
-        SendJson(response, HttpStatusCode.OK, new { ok = true });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["ok"] = true });
     }
 
     private async Task HandleSetUsername(HttpListenerRequest request, HttpListenerResponse response)
@@ -374,18 +382,18 @@ public class WebServer : IDisposable
         {
             _localUsername = username;
             // Store in DHT
-            await _dht.Store($"user:{username}", JsonSerializer.Serialize(new { username, lastSeen = DateTime.UtcNow }));
+            await _dht.Store($"user:{username}", new JsonObject { ["username"] = username!, ["lastSeen"] = DateTime.UtcNow }.ToJsonString());
         }
-        SendJson(response, HttpStatusCode.OK, new { ok = true, username = _localUsername });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["ok"] = true, ["username"] = _localUsername });
     }
 
     private void HandleDhtStats(HttpListenerResponse response)
     {
-        SendJson(response, HttpStatusCode.OK, new
+        SendJson(response, HttpStatusCode.OK, new JsonObject
         {
-            nodeId = _dht.NodeIdHex,
-            nodeCount = _dht.NodeCount,
-            port = _dht.Port
+            ["nodeId"] = _dht.NodeIdHex,
+            ["nodeCount"] = _dht.NodeCount,
+            ["port"] = _dht.Port
         });
     }
 
@@ -399,21 +407,25 @@ public class WebServer : IDisposable
             await _dht.Bootstrap(req.Host, req.Port);
         }
 
-        SendJson(response, HttpStatusCode.OK, new { ok = true, nodeCount = _dht.NodeCount });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["ok"] = true, ["nodeCount"] = _dht.NodeCount });
     }
 
     private void HandleGetPeers(HttpListenerResponse response)
     {
         List<KBucketNode> nodes = _dht.GetAllNodes();
-        var peers = nodes.Take(50).Select(n => new
+        var peersArr = new JsonArray();
+        foreach (var n in nodes.Take(50))
         {
-            nodeId = Convert.ToHexString(n.NodeId[..8]),
-            ip = n.EndPoint.Address.ToString(),
-            port = n.EndPoint.Port,
-            lastSeen = n.LastSeen
-        });
+            peersArr.Add(new JsonObject
+            {
+                ["nodeId"] = Convert.ToHexString(n.NodeId[..8]),
+                ["ip"] = n.EndPoint.Address.ToString(),
+                ["port"] = n.EndPoint.Port,
+                ["lastSeen"] = n.LastSeen
+            });
+        }
 
-        SendJson(response, HttpStatusCode.OK, new { peers });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["peers"] = peersArr });
     }
 
     private async Task HandleLoadWorld(HttpListenerRequest request, HttpListenerResponse response)
@@ -422,56 +434,51 @@ public class WebServer : IDisposable
         
         try
         {
-            // Read multipart form data
             if (!request.HasEntityBody)
             {
-                SendJson(response, HttpStatusCode.BadRequest, new { error = "No file uploaded" });
+                SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "No file uploaded" });
                 return;
             }
 
             string contentType = request.ContentType ?? "";
             if (!contentType.StartsWith("multipart/form-data"))
             {
-                SendJson(response, HttpStatusCode.BadRequest, new { error = "Expected multipart/form-data" });
+                SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "Expected multipart/form-data" });
                 return;
             }
 
-            // Parse multipart form data
             string boundary = GetBoundary(contentType);
             if (string.IsNullOrEmpty(boundary))
             {
-                SendJson(response, HttpStatusCode.BadRequest, new { error = "Missing boundary" });
+                SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "Missing boundary" });
                 return;
             }
 
             var (fileData, _) = await ParseMultipartFile(request.InputStream, boundary);
             if (fileData == null || fileData.Length == 0)
             {
-                SendJson(response, HttpStatusCode.BadRequest, new { error = "No file data found" });
+                SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "No file data found" });
                 return;
             }
 
             PT.Print($"[WebUI] Received world file: {fileData.Length} bytes");
 
-            // Save to a temp file and pass the path to the game server
             string tempDir = Path.Combine(Path.GetTempPath(), "polytoria-webui");
             Directory.CreateDirectory(tempDir);
             string tempPath = Path.Combine(tempDir, "upload_" + Guid.NewGuid() + ".poly");
             await File.WriteAllBytesAsync(tempPath, fileData);
 
-            // Trigger game server launch with the file path
             WorldLoadRequested?.Invoke(tempPath);
 
-            SendJson(response, HttpStatusCode.OK, new { success = true, size = fileData.Length, path = tempPath });
+            SendJson(response, HttpStatusCode.OK, new JsonObject { ["success"] = true, ["size"] = fileData.Length, ["path"] = tempPath });
         }
         catch (Exception ex)
         {
             GD.PushError($"[WebUI] Load world error: {ex}");
-            SendJson(response, HttpStatusCode.InternalServerError, new { error = ex.Message });
+            SendJson(response, HttpStatusCode.InternalServerError, new JsonObject { ["error"] = ex.Message });
         }
     }
 
-    // Event for launching the game server with a world file path
     public event Action<string>? WorldLoadRequested;
 
     // === Game Storage API ===
@@ -491,11 +498,11 @@ public class WebServer : IDisposable
 
     private void HandleGetGames(HttpListenerResponse response)
     {
-        var games = new List<object>();
+        var games = new List<JsonNode>();
 
         if (!Directory.Exists(_gamesDir))
         {
-            SendJson(response, HttpStatusCode.OK, new { games });
+            SendJson(response, HttpStatusCode.OK, new JsonObject { ["games"] = new JsonArray() });
             return;
         }
 
@@ -507,17 +514,17 @@ public class WebServer : IDisposable
             {
                 try
                 {
-                    string json = File.ReadAllText(metaPath);
-                    var meta = JsonSerializer.Deserialize<GameMetadata>(json);
-                    if (meta != null)
+                    string metaJson = File.ReadAllText(metaPath);
+                    var metaObj = JsonNode.Parse(metaJson) as JsonObject;
+                    if (metaObj != null)
                     {
-                        games.Add(new
+                        games.Add(new JsonObject
                         {
-                            id,
-                            name = meta.Name,
-                            fileName = meta.FileName,
-                            fileSize = meta.FileSize,
-                            createdAt = meta.CreatedAt
+                            ["id"] = id,
+                            ["name"] = metaObj["name"]?.GetValue<string>() ?? "",
+                            ["fileName"] = metaObj["fileName"]?.GetValue<string>() ?? "",
+                            ["fileSize"] = metaObj["fileSize"]?.GetValue<long>() ?? 0,
+                            ["createdAt"] = metaObj["createdAt"]?.GetValue<DateTime>() ?? DateTime.MinValue
                         });
                     }
                 }
@@ -527,14 +534,16 @@ public class WebServer : IDisposable
 
         games.Sort((a, b) =>
         {
-            var aDict = (System.Text.Json.JsonElement)JsonSerializer.SerializeToElement(a);
-            var bDict = (System.Text.Json.JsonElement)JsonSerializer.SerializeToElement(b);
-            DateTime aTime = aDict.GetProperty("createdAt").GetDateTime();
-            DateTime bTime = bDict.GetProperty("createdAt").GetDateTime();
+            var aObj = (JsonObject)a;
+            var bObj = (JsonObject)b;
+            DateTime aTime = aObj["createdAt"]!.GetValue<DateTime>();
+            DateTime bTime = bObj["createdAt"]!.GetValue<DateTime>();
             return bTime.CompareTo(aTime);
         });
 
-        SendJson(response, HttpStatusCode.OK, new { games });
+        var gamesArr = new JsonArray();
+        foreach (var g in games) gamesArr.Add(g);
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["games"] = gamesArr });
     }
 
     private async Task HandleUploadGame(HttpListenerRequest request, HttpListenerResponse response)
@@ -543,28 +552,28 @@ public class WebServer : IDisposable
         {
             if (!request.HasEntityBody)
             {
-                SendJson(response, HttpStatusCode.BadRequest, new { error = "No file uploaded" });
+                SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "No file uploaded" });
                 return;
             }
 
             string contentType = request.ContentType ?? "";
             if (!contentType.StartsWith("multipart/form-data"))
             {
-                SendJson(response, HttpStatusCode.BadRequest, new { error = "Expected multipart/form-data" });
+                SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "Expected multipart/form-data" });
                 return;
             }
 
             string boundary = GetBoundary(contentType);
             if (string.IsNullOrEmpty(boundary))
             {
-                SendJson(response, HttpStatusCode.BadRequest, new { error = "Missing boundary" });
+                SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "Missing boundary" });
                 return;
             }
 
             var (fileData, originalName) = await ParseMultipartFile(request.InputStream, boundary);
             if (fileData == null || fileData.Length == 0)
             {
-                SendJson(response, HttpStatusCode.BadRequest, new { error = "No file data found" });
+                SendJson(response, HttpStatusCode.BadRequest, new JsonObject { ["error"] = "No file data found" });
                 return;
             }
 
@@ -574,7 +583,6 @@ public class WebServer : IDisposable
             string id = SanitizeGameName(baseName);
             if (string.IsNullOrWhiteSpace(id)) id = Guid.NewGuid().ToString("N")[..8];
 
-            // Avoid collisions
             string finalId = id;
             int counter = 1;
             while (Directory.Exists(GameDir(finalId)))
@@ -592,27 +600,33 @@ public class WebServer : IDisposable
                 FileSize: fileData.Length,
                 CreatedAt: DateTime.UtcNow
             );
-            await File.WriteAllTextAsync(GameMetaPath(finalId), JsonSerializer.Serialize(meta));
+            await File.WriteAllTextAsync(GameMetaPath(finalId), new JsonObject
+            {
+                ["name"] = meta.Name,
+                ["fileName"] = meta.FileName,
+                ["fileSize"] = meta.FileSize,
+                ["createdAt"] = meta.CreatedAt
+            }.ToJsonString());
 
             PT.Print($"[WebUI] Game saved: {finalId} ({fileData.Length} bytes)");
 
-            SendJson(response, HttpStatusCode.OK, new
+            SendJson(response, HttpStatusCode.OK, new JsonObject
             {
-                success = true,
-                game = new
+                ["success"] = true,
+                ["game"] = new JsonObject
                 {
-                    id = finalId,
-                    name = meta.Name,
-                    fileName = meta.FileName,
-                    fileSize = meta.FileSize,
-                    createdAt = meta.CreatedAt
+                    ["id"] = finalId,
+                    ["name"] = meta.Name,
+                    ["fileName"] = meta.FileName,
+                    ["fileSize"] = meta.FileSize,
+                    ["createdAt"] = meta.CreatedAt
                 }
             });
         }
         catch (Exception ex)
         {
             GD.PushError($"[WebUI] Upload game error: {ex}");
-            SendJson(response, HttpStatusCode.InternalServerError, new { error = ex.Message });
+            SendJson(response, HttpStatusCode.InternalServerError, new JsonObject { ["error"] = ex.Message });
         }
     }
 
@@ -621,14 +635,14 @@ public class WebServer : IDisposable
         string polyPath = GamePolyPath(id);
         if (!File.Exists(polyPath))
         {
-            SendJson(response, HttpStatusCode.NotFound, new { error = "Game not found" });
+            SendJson(response, HttpStatusCode.NotFound, new JsonObject { ["error"] = "Game not found" });
             return;
         }
 
         WorldLoadRequested?.Invoke(polyPath);
 
         var fileInfo = new FileInfo(polyPath);
-        SendJson(response, HttpStatusCode.OK, new { success = true, size = fileInfo.Exists ? fileInfo.Length : 0 });
+        SendJson(response, HttpStatusCode.OK, new JsonObject { ["success"] = true, ["size"] = fileInfo.Exists ? fileInfo.Length : 0 });
     }
 
     private void HandleDeleteGame(string id, HttpListenerResponse response)
@@ -636,7 +650,7 @@ public class WebServer : IDisposable
         string dir = GameDir(id);
         if (!Directory.Exists(dir))
         {
-            SendJson(response, HttpStatusCode.NotFound, new { error = "Game not found" });
+            SendJson(response, HttpStatusCode.NotFound, new JsonObject { ["error"] = "Game not found" });
             return;
         }
 
@@ -644,12 +658,12 @@ public class WebServer : IDisposable
         {
             Directory.Delete(dir, recursive: true);
             PT.Print($"[WebUI] Game deleted: {id}");
-            SendJson(response, HttpStatusCode.OK, new { success = true });
+            SendJson(response, HttpStatusCode.OK, new JsonObject { ["success"] = true });
         }
         catch (Exception ex)
         {
             GD.PushError($"[WebUI] Delete game error: {ex}");
-            SendJson(response, HttpStatusCode.InternalServerError, new { error = ex.Message });
+            SendJson(response, HttpStatusCode.InternalServerError, new JsonObject { ["error"] = ex.Message });
         }
     }
 
@@ -747,13 +761,13 @@ public class WebServer : IDisposable
             PT.Print($"[WebUI] WebSocket connected: {connectionId}");
 
             // Send initial state
-            byte[] connectedMsg = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+            byte[] connectedMsg = Encoding.UTF8.GetBytes(new JsonObject
             {
-                type = "connected",
-                connectionId,
-                username = _localUsername,
-                nodeId = _dht.NodeIdHex[..16]
-            }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+                ["type"] = "connected",
+                ["connectionId"] = connectionId,
+                ["username"] = _localUsername,
+                ["nodeId"] = _dht.NodeIdHex[..16]
+            }.ToJsonString());
             await ws.SendFrame(connectedMsg);
 
             // Listen for messages
@@ -792,14 +806,14 @@ public class WebServer : IDisposable
                 WebSocketConnection? ws = _webSockets.GetValueOrDefault(connectionId);
                 if (ws != null)
                 {
-                    await ws.SendFrame(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+                    var arr = new JsonArray();
+                    foreach (var s in servers)
+                        arr.Add(JsonSerializer.SerializeToNode(s, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+                    await ws.SendFrame(Encoding.UTF8.GetBytes(new JsonObject
                     {
-                        type = "server_list",
-                        servers
-                    }, new JsonSerializerOptions
-                    {
-                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                    })));
+                        ["type"] = "server_list",
+                        ["servers"] = arr
+                    }.ToJsonString()));
                 }
                 break;
 
@@ -814,14 +828,23 @@ public class WebServer : IDisposable
                 };
                 await _dht.Store($"server:{code}", JsonSerializer.Serialize(server), TimeSpan.FromMinutes(30));
                 ServerCreated?.Invoke(code, _port);
-                BroadcastWsMessage(new { type = "server_created", code, server });
+                BroadcastWsMessage(new JsonObject
+                {
+                    ["type"] = "server_created",
+                    ["code"] = code,
+                    ["server"] = JsonSerializer.SerializeToNode(server, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })
+                });
                 break;
 
             case "set_username":
                 if (doc.RootElement.TryGetProperty("username", out JsonElement usernameEl))
                 {
                     _localUsername = usernameEl.GetString() ?? "Player";
-                    BroadcastWsMessage(new { type = "username", username = _localUsername });
+                    BroadcastWsMessage(new JsonObject
+                    {
+                        ["type"] = "username",
+                        ["username"] = _localUsername
+                    });
                 }
                 break;
 
@@ -919,12 +942,12 @@ public class WebServer : IDisposable
         return new string(code);
     }
 
-    private static void SendJson(HttpListenerResponse response, HttpStatusCode status, object data)
+    private static void SendJson(HttpListenerResponse response, HttpStatusCode status, JsonNode data)
     {
         response.StatusCode = (int)status;
         response.ContentType = "application/json";
 
-        string json = JsonSerializer.Serialize(data, new JsonSerializerOptions
+        string json = data.ToJsonString(new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });

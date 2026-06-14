@@ -120,10 +120,10 @@ public sealed partial class ClientEntry : Node3D
 			TestUserID = int.Parse(testUserID);
 		}
 #endif
-		networkMode ??= "client";
+		networkMode ??= "p2p";
 
 		cmdargs.TryGetValue("webui", out string? webuiMode);
-		bool isWebUIMode = networkMode == "p2p" || (webuiMode != "false" && webuiMode != "0");
+		bool isWebUIMode = networkMode == "p2p";
 
 		if (networkMode == "server")
 		{

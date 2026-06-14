@@ -6,6 +6,7 @@
 		<EnableDynamicLoading>true</EnableDynamicLoading>
 		<InvariantGlobalization>true</InvariantGlobalization>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
 		<Configurations>Debug;ExportDebug;ExportRelease</Configurations>
 	</PropertyGroup>
 
@@ -65,7 +66,7 @@
 
 	<!-- ExportRelease configuration -->
 	<PropertyGroup Condition="'$(Configuration)' == 'ExportRelease'">
-		<DefineConstants>$(DefineConstants);CLIENT</DefineConstants>
+		<DefineConstants>$(DefineConstants);CLIENT;ALLOW_SELFHOST</DefineConstants>
 		<PlatformTarget>AnyCPU</PlatformTarget>
 		<DebugType>None</DebugType>
 		<DebugSymbols>False</DebugSymbols>
